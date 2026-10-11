@@ -1,0 +1,867 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Global PropPredict | AI Valuation</title>
+    <script src="https://cdn.tailwindcss.com/3.4.17"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation@2.1.2/dist/chartjs-plugin-annotation.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet">
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    fontFamily: { sans: ['Inter', 'sans-serif'], display: ['Space Grotesk', 'sans-serif'] },
+                    colors: {
+                        navy: '#0A0E27', electric: '#4361EE', violet: '#7209B7',
+                        cyan: '#4CC9F0', gold: '#F72585',
+                        'status-green': '#10B981', 'status-red': '#EF4444', 'status-amber': '#F59E0B'
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        body { background: linear-gradient(135deg, #0A0E27, #151a3d, #2d1b4e); color: white; min-height: 100vh; overflow-x: hidden; }
+        .glass { background: rgba(255,255,255,0.05); backdrop-filter: blur(12px); border: 1px solid rgba(255,255,255,0.1); border-radius: 1rem; }
+        .step-panel { display: none; animation: slideIn 0.4s ease-out forwards; }
+        .step-panel.active { display: block; }
+        @keyframes slideIn { from { opacity:0; transform:translateX(30px); } to { opacity:1; transform:translateX(0); } }
+        .floating-house { animation: float 4s ease-in-out infinite; }
+        @keyframes float { 0%{transform:translateY(0px) rotate(0deg);} 50%{transform:translateY(-15px) rotate(2deg);} 100%{transform:translateY(0px) rotate(0deg);} }
+        .gauge-wrapper { width:200px; height:100px; position:relative; overflow:hidden; margin:0 auto; }
+        .gauge-background { width:200px; height:200px; background:conic-gradient(from 270deg,#EF4444 0deg,#F59E0B 45deg,#4CC9F0 135deg,#10B981 180deg,transparent 180deg); border-radius:50%; position:absolute; top:0; left:0; }
+        .gauge-center { width:160px; height:160px; background:#0A0E27; border-radius:50%; position:absolute; top:20px; left:20px; }
+        .gauge-needle { width:4px; height:100px; background:white; position:absolute; top:100px; left:98px; transform-origin:top center; transform:rotate(90deg); transition:transform 1s cubic-bezier(0.4,0,0.2,1); z-index:10; border-radius:2px; }
+        @keyframes pulse-border { 0%,100%{border-color:rgba(76,201,240,0.2);} 50%{border-color:rgba(76,201,240,0.7);} }
+        .live-loading { animation: pulse-border 1s ease-in-out infinite; }
+    </style>
+</head>
+<body class="font-sans antialiased text-gray-100">
+
+    <!-- Status banner — shown if API is unreachable -->
+    <div id="api-banner" class="hidden bg-yellow-600/80 text-white text-sm text-center py-2 px-4">
+        ⚠️ API server not detected at <strong>http://127.0.0.1:8000</strong>.
+        Run <code class="bg-black/30 px-1 rounded">uvicorn api:app --reload</code> in your terminal, then refresh.
+    </div>
+
+    <nav class="p-6 flex justify-between items-center border-b border-white/10 glass mb-8 sticky top-0 z-50">
+        <div class="text-2xl font-display font-bold bg-clip-text text-transparent bg-gradient-to-r from-cyan to-electric">PropPredict AI</div>
+        <div class="flex gap-4">
+            <button onclick="setMode('india')" id="btn-in" class="px-4 py-2 rounded-lg bg-electric text-white font-semibold transition-all shadow-[0_0_15px_rgba(67,97,238,0.5)]">🇮🇳 India Model</button>
+            <button onclick="setMode('usa')" id="btn-us" class="px-4 py-2 rounded-lg bg-white/10 hover:bg-white/20 transition-all text-white font-semibold">🇺🇸 US Model</button>
+        </div>
+    </nav>
+
+    <main class="max-w-6xl mx-auto px-4 grid grid-cols-1 lg:grid-cols-2 gap-12 items-center min-h-[70vh]">
+        <div class="space-y-6">
+            <h1 class="text-5xl lg:text-6xl font-display font-bold leading-tight">
+                Predict Any Home's <br>
+                <span class="text-transparent bg-clip-text bg-gradient-to-r from-violet to-cyan" id="hero-accent">True Value</span>
+            </h1>
+            <p class="text-lg text-gray-300">Stacked machine-learning estimates for India and the USA. Demo models use synthetic data until you supply real training CSVs. These estimates are not appraisals.</p>
+            <div class="glass p-6 mt-8">
+                <div class="flex justify-between items-center mb-2">
+                    <span class="text-sm text-gray-400">Current</span>
+                    <span class="font-display text-2xl text-cyan" id="ticker">Demo / CSV</span>
+                    <span class="text-sm text-gray-400">training source</span>
+                </div>
+                <div class="h-2 w-full bg-white/10 rounded-full overflow-hidden">
+                    <div class="h-full bg-gradient-to-r from-electric to-cyan w-full animate-pulse"></div>
+                </div>
+            </div>
+            <div class="w-32 h-32 mx-auto mt-8 relative floating-house">
+                <div class="absolute inset-0 bg-gradient-to-br from-electric to-violet rounded-xl shadow-[0_0_40px_rgba(114,9,183,0.6)] transform rotate-12"></div>
+                <div class="absolute inset-2 bg-navy rounded-xl border border-white/20 flex items-center justify-center text-4xl transform -rotate-6">🏠</div>
+            </div>
+        </div>
+
+        <div class="glass p-8 relative overflow-hidden">
+            <div class="flex gap-2 mb-8">
+                <div class="h-1 flex-1 bg-cyan rounded"></div>
+                <div class="h-1 flex-1 bg-white/20 rounded" id="prog-2"></div>
+                <div class="h-1 flex-1 bg-white/20 rounded" id="prog-3"></div>
+            </div>
+
+            <form id="pred-form" onsubmit="event.preventDefault(); submitForm();">
+                <!-- Step 1 -->
+                <div id="step-1" class="step-panel active space-y-4">
+                    <h2 class="text-2xl font-display mb-4">Property Details</h2>
+                    <div class="mb-4">
+                        <label class="block text-sm mb-1 text-cyan font-bold">Current Listing Price (Optional)</label>
+                        <input type="number" id="listing_price" placeholder="Enter if known to get negotiation advice"
+                            class="w-full bg-white/10 rounded p-3 text-white outline-none border border-cyan/50 focus:border-cyan shadow-[0_0_10px_rgba(76,201,240,0.2)]">
+                    </div>
+                    <div>
+                        <label class="block text-sm mb-1">Total Area (Sq Ft)</label>
+                        <input type="range" id="area" min="300" max="5000" value="1200" class="w-full accent-electric"
+                            oninput="document.getElementById('area-val').innerText=this.value; debouncedPreview();">
+                        <div class="text-right text-xs text-gray-400"><span id="area-val">1200</span> sq ft</div>
+                        <div id="live-preview-wrap" class="mt-3">
+                            <div id="live-preview-pill" class="glass p-3 rounded-lg flex items-center justify-between border border-white/10 transition-all duration-300">
+                                <span class="text-xs text-gray-400 font-medium uppercase tracking-wider">Live Estimate</span>
+                                <div class="flex items-center gap-3">
+                                    <div id="live-spinner" class="hidden"><div class="w-4 h-4 border-2 border-cyan border-t-transparent rounded-full animate-spin"></div></div>
+                                    <span id="live-price" class="font-display font-bold text-cyan text-lg">Fill form to preview</span>
+                                </div>
+                            </div>
+                            <div class="text-right text-xs text-gray-500 mt-1">Approx. 80% range: <span id="live-range">—</span></div>
+                        </div>
+                    </div>
+                    <div class="grid grid-cols-2 gap-4">
+                        <div><label class="block text-sm mb-1">Bedrooms</label><input type="number" id="beds" value="2" oninput="debouncedPreview()" class="w-full bg-white/10 rounded p-2 text-white outline-none border border-white/20 focus:border-cyan"></div>
+                        <div><label class="block text-sm mb-1">Bathrooms</label><input type="number" id="baths" value="2" oninput="debouncedPreview()" class="w-full bg-white/10 rounded p-2 text-white outline-none border border-white/20 focus:border-cyan"></div>
+                    </div>
+                    <!-- India-specific -->
+                    <div id="india-specific-1">
+                        <div class="grid grid-cols-2 gap-4 mt-4">
+                            <div><label class="block text-sm mb-1">Facing</label><select id="facing" class="w-full bg-slate-800 p-2 rounded"><option>East</option><option>North</option><option>West</option><option>South</option><option>North-East</option><option>South-East</option><option>North-West</option><option>South-West</option></select></div>
+                            <div><label class="block text-sm mb-1">Builder</label><select id="builder" class="w-full bg-slate-800 p-2 rounded"><option>Unknown</option><option>DLF</option><option>Godrej</option><option>Prestige</option><option>Sobha</option><option>Lodha</option></select></div>
+                        </div>
+                        <div class="grid grid-cols-2 gap-4 mt-4">
+                            <div><label class="block text-sm mb-1">Property Floor</label><input type="number" id="floor" value="5" class="w-full bg-white/10 p-2 rounded"></div>
+                            <div><label class="block text-sm mb-1">Total Floors</label><input type="number" id="total_floors" value="15" class="w-full bg-white/10 p-2 rounded"></div>
+                        </div>
+                        <div class="grid grid-cols-2 gap-4 mt-4">
+                            <div><label class="block text-sm mb-1" for="age_years">Property Age (years)</label><input type="number" id="age_years" value="5" min="0" max="300" class="w-full bg-white/10 rounded p-2"></div>
+                            <div><label class="block text-sm mb-1" for="rera_approved">RERA Approved?</label><select id="rera_approved" class="w-full bg-slate-800 p-2 rounded"><option value="1">Yes</option><option value="0">No</option></select></div>
+                        </div>
+                    </div>
+                    <!-- US-specific -->
+                    <div id="us-specific-1" class="hidden">
+                        <div class="grid grid-cols-2 gap-4 mt-4">
+                            <div><label class="block text-sm mb-1">Year Built</label><input type="number" id="year_built" value="1995" class="w-full bg-white/10 p-2 rounded"></div>
+                            <div><label class="block text-sm mb-1">Lot Area (Sq Ft)</label><input type="number" id="lot_area" value="6000" class="w-full bg-white/10 p-2 rounded"></div>
+                        </div>
+                        <div class="grid grid-cols-2 gap-4 mt-4">
+                            <div><label class="block text-sm mb-1" for="year_remodeled">Year Remodeled</label><input type="number" id="year_remodeled" value="2000" min="1700" max="2100" class="w-full bg-white/10 rounded p-2"></div>
+                            <div><label class="block text-sm mb-1" for="hvac_age">HVAC Age (years)</label><input type="number" id="hvac_age" value="5" min="0" max="100" class="w-full bg-white/10 rounded p-2"></div>
+                            <div><label class="block text-sm mb-1" for="bsmt_total_sqft">Basement Area (sq ft)</label><input type="number" id="bsmt_total_sqft" value="800" min="0" class="w-full bg-white/10 rounded p-2"></div>
+                            <div><label class="block text-sm mb-1" for="bsmt_finished_sqft">Finished Basement (sq ft)</label><input type="number" id="bsmt_finished_sqft" value="600" min="0" class="w-full bg-white/10 rounded p-2"></div>
+                        </div>
+                    </div>
+                    <button type="button" onclick="nextStep(2)" class="w-full mt-6 bg-electric hover:bg-blue-600 text-white p-3 rounded-lg font-bold transition">Next Step ➔</button>
+                </div>
+
+                <!-- Step 2 -->
+                <div id="step-2" class="step-panel space-y-4">
+                    <h2 class="text-2xl font-display mb-4">Location & Access</h2>
+                    <div class="mb-4">
+                        <label class="block text-sm mb-1">City / State</label>
+                        <input type="text" id="city_state" placeholder="e.g. Bengaluru or California"
+                            class="w-full bg-white/10 rounded p-2 text-white outline-none border border-white/20 focus:border-cyan">
+                    </div>
+                    <div id="india-specific-2">
+                        <label class="block text-sm mb-1">Distance to Metro (km)</label>
+                        <input type="range" id="dist_metro" min="0" max="20" step="0.5" value="2.5" class="w-full accent-cyan"
+                            oninput="document.getElementById('m-val').innerText=this.value; debouncedPreview();">
+                        <div class="text-right text-xs"><span id="m-val">2.5</span> km</div>
+                        <label class="block text-sm mt-4 mb-1">Distance to IT Park (km)</label>
+                        <input type="range" id="dist_it" min="0" max="30" step="1" value="5" class="w-full accent-cyan"
+                            oninput="document.getElementById('it-val').innerText=this.value; debouncedPreview();">
+                        <div class="text-right text-xs"><span id="it-val">5</span> km</div>
+                        <div class="grid grid-cols-2 gap-4 mt-4">
+                            <div><label class="block text-sm mb-1" for="dist_bus">Bus Stop (km)</label><input type="number" id="dist_bus" min="0" step="0.1" value="2" class="w-full bg-white/10 rounded p-2"></div>
+                            <div><label class="block text-sm mb-1" for="dist_railway">Railway Station (km)</label><input type="number" id="dist_railway" min="0" step="0.1" value="5" class="w-full bg-white/10 rounded p-2"></div>
+                            <div><label class="block text-sm mb-1" for="dist_highway">Highway (km)</label><input type="number" id="dist_highway" min="0" step="0.1" value="3" class="w-full bg-white/10 rounded p-2"></div>
+                            <div><label class="block text-sm mb-1" for="dist_school">School (km)</label><input type="number" id="dist_school" min="0" step="0.1" value="1.5" class="w-full bg-white/10 rounded p-2"></div>
+                        </div>
+                    </div>
+                    <div id="us-specific-2" class="hidden">
+                        <label class="block text-sm mt-2 mb-1">ZIP code (USA)</label>
+                        <input type="number" id="zipcode" value="90210" min="501" max="99950" class="w-full bg-white/10 p-2 rounded" oninput="debouncedPreview()">
+                        <label class="block text-sm mb-1">School District Rating (1-10)</label>
+                        <input type="range" id="school_rating" min="1" max="10" value="7" class="w-full accent-gold">
+                        <label class="block text-sm mt-4 mb-1">Walk Score</label>
+                        <input type="range" id="walk_score" min="0" max="100" value="65" class="w-full accent-gold">
+                        <div class="grid grid-cols-2 gap-4 mt-4">
+                            <div><label class="block text-sm mb-1" for="transit_score">Transit Score (0–100)</label><input type="number" id="transit_score" min="0" max="100" value="50" class="w-full bg-white/10 rounded p-2"></div>
+                            <div><label class="block text-sm mb-1" for="bike_score">Bike Score (0–100)</label><input type="number" id="bike_score" min="0" max="100" value="50" class="w-full bg-white/10 rounded p-2"></div>
+                            <div><label class="block text-sm mb-1" for="hoa_fees">Monthly HOA Fees ($)</label><input type="number" id="hoa_fees" min="0" value="150" class="w-full bg-white/10 rounded p-2"></div>
+                            <div><label class="block text-sm mb-1" for="commute_time">Commute (minutes)</label><input type="number" id="commute_time" min="0" value="30" class="w-full bg-white/10 rounded p-2"></div>
+                            <div><label class="block text-sm mb-1" for="flood_zone">Flood Risk Zone?</label><select id="flood_zone" class="w-full bg-slate-800 p-2 rounded"><option value="0">No</option><option value="1">Yes</option></select></div>
+                            <div><label class="block text-sm mb-1" for="fire_zone">Fire Risk Zone?</label><select id="fire_zone" class="w-full bg-slate-800 p-2 rounded"><option value="0">No</option><option value="1">Yes</option></select></div>
+                        </div>
+                    </div>
+                    <div class="flex gap-4 mt-6">
+                        <button type="button" onclick="nextStep(1)" class="flex-1 bg-white/10 p-3 rounded-lg">Back</button>
+                        <button type="submit" id="run-model-btn" class="flex-[2] bg-gradient-to-r from-violet to-electric p-3 rounded-lg font-bold shadow-lg shadow-violet/50 flex items-center justify-center gap-2">Run AI Model</button>
+                    </div>
+                </div>
+            </form>
+
+            <!-- Results -->
+            <div id="results" class="hidden space-y-6">
+                <div class="text-center">
+                    <h3 class="text-gray-400 mb-1">Estimated Market Value</h3>
+                    <div class="text-5xl font-display font-bold text-white mb-2" id="final-price">₹ 0</div>
+                    <p class="text-xs text-amber-300 mb-3" id="model-source"></p>
+                    <div class="text-sm text-gray-400 bg-white/5 inline-block px-3 py-1 rounded-full">
+                        Calibrated approx. 80% interval: <span id="range-low"></span> – <span id="range-high"></span>
+                    </div>
+                </div>
+                <div class="mt-6 border-t border-white/10 pt-6">
+                    <h4 class="text-sm font-bold text-cyan mb-2">Feature contributions</h4>
+                    <p id="explanation-scope" class="text-xs text-gray-400 mb-4">XGBoost base learner; not the full stacking ensemble</p>
+                    <canvas id="shapChart" height="150"></canvas>
+                    <p id="shap-fallback" class="hidden text-xs text-amber-300">Charts unavailable; check the Chart.js internet connection.</p>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- Advanced Analytics -->
+    <section id="advanced-results" class="max-w-6xl mx-auto px-4 pb-20 hidden mt-8">
+        <h2 class="text-3xl font-display font-bold mb-8 border-b border-white/10 pb-4">Advanced Analytics</h2>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+            <!-- Negotiation -->
+            <div id="neg-card" class="glass p-6 hidden">
+                <h3 class="text-xl font-bold mb-4 flex items-center gap-2">🤝 Negotiation Advisor</h3>
+                <div id="neg-badge" class="inline-block px-4 py-1 rounded-full text-sm font-bold mb-4">Status</div>
+                <div class="space-y-2">
+                    <div class="flex justify-between border-b border-white/10 pb-2"><span class="text-gray-400">Difference:</span><span id="neg-diff" class="font-bold">0%</span></div>
+                    <div class="flex justify-between border-b border-white/10 pb-2"><span class="text-gray-400">Suggested Offer:</span><span id="neg-offer" class="font-bold text-cyan text-lg">0</span></div>
+                    <p id="neg-advice" class="text-sm text-gray-300 mt-4 italic"></p>
+                </div>
+            </div>
+            <!-- Investment Score -->
+            <div class="glass p-6 text-center">
+                <h3 class="text-xl font-bold mb-2">📈 Investment Scenario Score</h3>
+                <p class="text-xs text-gray-400 mb-4">Enter your own assumptions. This is a scenario calculation, not a property investment rating or market-data estimate. A listing price is also required.</p>
+                <div class="grid grid-cols-2 gap-3 mb-4 text-left">
+                    <div><label class="block text-xs mb-1" for="inv_cagr">Expected growth (%/year)</label><input type="number" id="inv_cagr" min="0" max="30" step="0.1" placeholder="e.g. 8" class="w-full bg-white/10 rounded p-2"></div>
+                    <div><label class="block text-xs mb-1" for="inv_yield">Expected rental yield (%)</label><input type="number" id="inv_yield" min="0" max="20" step="0.1" placeholder="e.g. 4" class="w-full bg-white/10 rounded p-2"></div>
+                    <div class="col-span-2"><label class="block text-xs mb-1" for="inv_infra">Your infrastructure rating (0–10)</label><input type="number" id="inv_infra" min="0" max="10" step="0.5" placeholder="e.g. 6" class="w-full bg-white/10 rounded p-2"></div>
+                </div>
+                <button type="button" onclick="runInvestmentScore()" id="btn-investment" class="w-full bg-white/10 hover:bg-white/20 p-2 rounded mb-4 text-sm font-bold">Calculate Scenario Score</button>
+                <div class="gauge-wrapper"><div class="gauge-background"></div><div class="gauge-center"></div><div class="gauge-needle" id="gauge-needle"></div></div>
+                <div class="mt-2 font-display text-4xl font-bold" id="inv-score-val">—</div>
+                <div class="text-sm font-bold mt-2" id="inv-verdict">Enter assumptions to calculate.</div>
+            </div>
+            <!-- 5-Year Projection -->
+            <div class="glass p-6">
+                <h3 class="text-xl font-bold mb-2">🔮 5-Year Price Projection</h3>
+                <p class="text-xs text-gray-400 mb-4" id="future-sub">Calculating CAGR...</p>
+                <canvas id="futureChart" height="200"></canvas>
+            </div>
+            <!-- Rent vs Buy -->
+            <div class="glass p-6">
+                <h3 class="text-xl font-bold mb-4">⚖️ Rent vs Buy</h3>
+                <div class="grid grid-cols-2 gap-4 mb-4">
+                    <div><label class="block text-xs mb-1">Monthly Rent</label><input type="number" id="calc_rent" value="25000" class="w-full bg-white/10 rounded p-2"></div>
+                    <div><label class="block text-xs mb-1">Down Payment %</label><input type="number" id="calc_down" value="20" class="w-full bg-white/10 rounded p-2"></div>
+                </div>
+                <button onclick="runRentVsBuy()" class="w-full bg-white/10 hover:bg-white/20 p-2 rounded mb-4 text-sm font-bold">Calculate Breakeven</button>
+                <p class="text-center font-bold text-cyan mb-2" id="rent-buy-verdict"></p>
+                <canvas id="rentBuyChart" height="200"></canvas>
+            </div>
+        </div>
+        <div class="mt-8 text-center">
+            <button onclick="resetForm()" class="px-8 py-3 bg-gradient-to-r from-violet to-electric rounded-lg font-bold shadow-lg shadow-violet/50 hover:opacity-90 transition">New Prediction</button>
+        </div>
+    </section>
+
+    <!-- Compare Properties -->
+    <section class="max-w-6xl mx-auto px-4 py-12 border-t border-white/10 mt-4">
+        <div class="flex items-center gap-4 mb-8">
+            <h2 class="text-3xl font-display font-bold">⚖️ Compare Two Properties</h2>
+            <div class="h-px bg-gradient-to-r from-white/20 to-transparent flex-1"></div>
+        </div>
+        <p class="text-gray-400 mb-8 -mt-4">Compare two model valuations side by side; lower market price is not necessarily a better deal. The simplified comparison assumes defaults for features not shown; use the main form for a detailed estimate.</p>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+            <!-- Property A -->
+            <div class="glass p-6" style="border-left:3px solid #4361EE;">
+                <h3 class="text-lg font-bold mb-4 text-electric">🏠 Property A</h3>
+                <div class="flex gap-2 mb-4">
+                    <button onclick="setCompareMode('A','india')" id="cmp-a-in" class="flex-1 py-1.5 rounded-lg bg-electric text-white text-sm font-bold">🇮🇳 India</button>
+                    <button onclick="setCompareMode('A','usa')" id="cmp-a-us" class="flex-1 py-1.5 rounded-lg bg-white/10 text-white text-sm font-bold">🇺🇸 USA</button>
+                </div>
+                <div class="space-y-3">
+                    <div><label class="text-xs text-gray-400 mb-1 block">Area (Sq Ft)</label><input type="number" id="cmp-a-area" value="1200" class="w-full bg-white/10 rounded p-2 text-white outline-none border border-white/20 focus:border-electric"></div>
+                    <div class="grid grid-cols-2 gap-3">
+                        <div><label class="text-xs text-gray-400 mb-1 block">Bedrooms</label><input type="number" id="cmp-a-beds" value="2" class="w-full bg-white/10 rounded p-2 outline-none border border-white/20 focus:border-electric"></div>
+                        <div><label class="text-xs text-gray-400 mb-1 block">Bathrooms</label><input type="number" id="cmp-a-baths" value="2" class="w-full bg-white/10 rounded p-2 outline-none border border-white/20 focus:border-electric"></div>
+                    </div>
+                    <div><label class="text-xs text-gray-400 mb-1 block">City / State</label><input type="text" id="cmp-a-city" value="Bengaluru" class="w-full bg-white/10 rounded p-2 text-white outline-none border border-white/20 focus:border-electric"></div>
+                    <div><label class="text-xs text-gray-400 mb-1 block">Listing Price (Optional)</label><input type="number" id="cmp-a-listing" placeholder="For negotiation context" class="w-full bg-white/10 rounded p-2 text-white outline-none border border-white/20 focus:border-electric"></div>
+                </div>
+            </div>
+            <!-- Property B -->
+            <div class="glass p-6" style="border-left:3px solid #7209B7;">
+                <h3 class="text-lg font-bold mb-4 text-violet-400">🏡 Property B</h3>
+                <div class="flex gap-2 mb-4">
+                    <button onclick="setCompareMode('B','india')" id="cmp-b-in" class="flex-1 py-1.5 rounded-lg bg-electric text-white text-sm font-bold">🇮🇳 India</button>
+                    <button onclick="setCompareMode('B','usa')" id="cmp-b-us" class="flex-1 py-1.5 rounded-lg bg-white/10 text-white text-sm font-bold">🇺🇸 USA</button>
+                </div>
+                <div class="space-y-3">
+                    <div><label class="text-xs text-gray-400 mb-1 block">Area (Sq Ft)</label><input type="number" id="cmp-b-area" value="1500" class="w-full bg-white/10 rounded p-2 text-white outline-none border border-white/20 focus:border-violet"></div>
+                    <div class="grid grid-cols-2 gap-3">
+                        <div><label class="text-xs text-gray-400 mb-1 block">Bedrooms</label><input type="number" id="cmp-b-beds" value="3" class="w-full bg-white/10 rounded p-2 outline-none border border-white/20 focus:border-violet"></div>
+                        <div><label class="text-xs text-gray-400 mb-1 block">Bathrooms</label><input type="number" id="cmp-b-baths" value="2" class="w-full bg-white/10 rounded p-2 outline-none border border-white/20 focus:border-violet"></div>
+                    </div>
+                    <div><label class="text-xs text-gray-400 mb-1 block">City / State</label><input type="text" id="cmp-b-city" value="Mumbai" class="w-full bg-white/10 rounded p-2 text-white outline-none border border-white/20 focus:border-violet"></div>
+                    <div><label class="text-xs text-gray-400 mb-1 block">Listing Price (Optional)</label><input type="number" id="cmp-b-listing" placeholder="For negotiation context" class="w-full bg-white/10 rounded p-2 text-white outline-none border border-white/20 focus:border-violet"></div>
+                </div>
+            </div>
+        </div>
+        <button onclick="compareProperties()" id="btn-compare" class="w-full bg-gradient-to-r from-electric to-violet p-4 rounded-xl font-bold text-lg shadow-lg shadow-violet/30 hover:opacity-90 transition flex items-center justify-center gap-2 mb-8">⚡ Run AI Comparison →</button>
+
+        <div id="compare-results" class="hidden space-y-6">
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div class="glass p-6 text-center relative" id="cmp-card-a" style="border-left:3px solid #4361EE;">
+                    <div class="text-sm text-gray-400 mb-1">Property A</div>
+                    <div class="text-3xl font-display font-bold text-white mb-2" id="cmp-price-a">—</div>
+                    <div class="text-xs text-gray-500">Range: <span id="cmp-low-a">—</span> – <span id="cmp-high-a">—</span></div>
+                    <div id="cmp-badge-a" class="hidden mt-3 inline-block px-3 py-1 rounded-full text-xs font-bold bg-status-green text-white">Lower Estimated Price</div>
+                </div>
+                <div class="glass p-6 text-center relative" id="cmp-card-b" style="border-left:3px solid #7209B7;">
+                    <div class="text-sm text-gray-400 mb-1">Property B</div>
+                    <div class="text-3xl font-display font-bold text-white mb-2" id="cmp-price-b">—</div>
+                    <div class="text-xs text-gray-500">Range: <span id="cmp-low-b">—</span> – <span id="cmp-high-b">—</span></div>
+                    <div id="cmp-badge-b" class="hidden mt-3 inline-block px-3 py-1 rounded-full text-xs font-bold bg-status-green text-white">Lower Estimated Price</div>
+                </div>
+            </div>
+            <div class="glass p-4 text-center"><p class="text-lg font-bold" id="cmp-diff-text">—</p></div>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div class="glass p-6"><h4 class="text-sm font-bold text-cyan mb-4">Area &amp; Rooms (Normalized)</h4><canvas id="radarChart" height="260"></canvas></div>
+                <div class="glass p-6 flex flex-col justify-center" id="cmp-verdict-card">
+                    <h4 class="text-xl font-bold mb-4">Valuation Comparison</h4>
+                    <div class="text-4xl font-display font-bold mb-3" id="cmp-winner">—</div>
+                    <p class="text-gray-300 text-sm leading-relaxed" id="cmp-reason">—</p>
+                    <div class="mt-6 p-3 rounded-lg bg-white/5 border border-white/10 text-xs text-gray-400">Lower estimated price does not imply better investment value; compare actual asking price, condition, and location.</div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Bulk Prediction -->
+    <section class="max-w-6xl mx-auto px-4 py-12 border-t border-white/10 mt-12 mb-12">
+        <h2 class="text-3xl font-display font-bold mb-6">Bulk AI Prediction API</h2>
+        <div class="glass p-8">
+            <div class="flex flex-col md:flex-row gap-8 items-center">
+                <div class="flex-1 w-full">
+                    <div class="border-2 border-dashed border-white/30 rounded-xl p-8 text-center hover:bg-white/5 transition cursor-pointer" onclick="document.getElementById('csv-upload').click()">
+                        <div class="text-4xl mb-4">📁</div>
+                        <p class="font-bold">Click to upload CSV dataset</p>
+                        <p class="text-sm text-gray-400 mt-2">Max 5,000 rows / 5 MB. CSV must contain all required model inputs.</p>
+                        <input type="file" id="csv-upload" accept=".csv" class="hidden" onchange="handleFileUpload(event)">
+                    </div>
+                </div>
+                <div class="flex-1 w-full space-y-4">
+                    <p id="file-name" class="text-cyan font-bold">No file selected.</p>
+                    <div class="flex gap-4">
+                        <label class="flex items-center gap-2"><input type="radio" name="bulk-mode" value="india" checked> India Model</label>
+                        <label class="flex items-center gap-2"><input type="radio" name="bulk-mode" value="usa"> US Model</label>
+                    </div>
+                    <button onclick="uploadBulk()" class="w-full bg-electric p-3 rounded-lg font-bold shadow-lg hover:bg-blue-600 transition flex items-center justify-center gap-2" id="btn-bulk">Run Bulk Predictions</button>
+                </div>
+            </div>
+            <div id="bulk-results" class="mt-8 hidden">
+                <div class="flex justify-between items-center mb-4">
+                    <h3 class="font-bold">Results (<span id="bulk-count">0</span> rows)</h3>
+                    <button onclick="downloadBulkCSV()" class="bg-white/10 px-4 py-2 rounded hover:bg-white/20 text-sm">📥 Download CSV</button>
+                </div>
+                <div class="max-h-64 overflow-y-auto border border-white/10 rounded-lg">
+                    <table class="w-full text-sm text-left">
+                        <thead class="bg-white/5 sticky top-0"><tr><th class="p-3">Row</th><th class="p-3">Prediction</th><th class="p-3">Low</th><th class="p-3">High</th></tr></thead>
+                        <tbody id="bulk-table-body" class="divide-y divide-white/10"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <script>
+        // ── Config ──────────────────────────────────────────────────────────
+        // Same-origin in deployment; API port 8000 when using VS Code Live Server
+        // (typically 5500), or when opening the HTML directly from disk.
+        const IS_LOCAL = ['localhost', '127.0.0.1'].includes(location.hostname);
+        const API = window.PROPPREDICT_API_URL ||
+            (location.protocol === 'file:' || (IS_LOCAL && location.port !== '8000')
+                ? 'http://127.0.0.1:8000' : location.origin);
+        function numberValue(id, fallback) {
+            const raw = document.getElementById(id).value;
+            if (raw === '') return fallback;
+            const parsed = Number(raw);
+            return Number.isFinite(parsed) ? parsed : fallback;
+        }
+        async function fetchJson(url, options = {}) {
+            const response = await fetch(url, options);
+            if (!response.ok) {
+                let message = `Server returned HTTP ${response.status}`;
+                try {
+                    const details = await response.json();
+                    message = typeof details.detail === 'string' ? details.detail :
+                        (Array.isArray(details.detail) && details.detail.length
+                            ? details.detail[0].msg || message : message);
+                } catch {}
+                const error = new Error(message);
+                error.status = response.status;
+                throw error;
+            }
+            return response.json();
+        }
+        function postJson(endpoint, payload) {
+            return fetchJson(`${API}${endpoint}`, {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+        }
+
+        // ── State ───────────────────────────────────────────────────────────
+        let currentMode = 'india';
+        let chartInstance = null, futureChartInst = null, rentBuyChartInst = null, radarChartInst = null;
+        let lastPredictionPrice = 0, lastCurrency = 'INR';
+        let bulkDataCache = [];
+        let compareModeA = 'india', compareModeB = 'india';
+
+        // ── API health check on load ─────────────────────────────────────────
+        window.addEventListener('load', async () => {
+            try {
+                const res = await fetch(`${API}/health`, { signal: AbortSignal.timeout(3000) });
+                if (!res.ok) throw new Error();
+            } catch {
+                document.getElementById('api-banner').classList.remove('hidden');
+            }
+        });
+
+        // ── Mode switching ───────────────────────────────────────────────────
+        function setMode(mode) {
+            currentMode = mode;
+            if (mode === 'india') {
+                document.getElementById('btn-in').className = "px-4 py-2 rounded-lg bg-electric text-white font-semibold transition-all shadow-[0_0_15px_rgba(67,97,238,0.5)]";
+                document.getElementById('btn-us').className  = "px-4 py-2 rounded-lg bg-white/10 text-white font-semibold";
+                document.getElementById('hero-accent').className = "text-transparent bg-clip-text bg-gradient-to-r from-violet to-cyan";
+                document.getElementById('india-specific-1').classList.remove('hidden');
+                document.getElementById('india-specific-2').classList.remove('hidden');
+                document.getElementById('us-specific-1').classList.add('hidden');
+                document.getElementById('us-specific-2').classList.add('hidden');
+                document.getElementById('calc_rent').value = 25000;
+            } else {
+                document.getElementById('btn-us').className  = "px-4 py-2 rounded-lg bg-gold text-white font-semibold transition-all shadow-[0_0_15px_rgba(247,37,133,0.5)]";
+                document.getElementById('btn-in').className  = "px-4 py-2 rounded-lg bg-white/10 text-white font-semibold";
+                document.getElementById('hero-accent').className = "text-transparent bg-clip-text bg-gradient-to-r from-gold to-electric";
+                document.getElementById('india-specific-1').classList.add('hidden');
+                document.getElementById('india-specific-2').classList.add('hidden');
+                document.getElementById('us-specific-1').classList.remove('hidden');
+                document.getElementById('us-specific-2').classList.remove('hidden');
+                document.getElementById('calc_rent').value = 2500;
+            }
+            debouncedPreview();
+        }
+
+        // ── Debounce helper ──────────────────────────────────────────────────
+        function debounce(fn, delay) {
+            let timer;
+            return function (...args) { clearTimeout(timer); timer = setTimeout(() => fn.apply(this, args), delay); };
+        }
+
+        // ── Live preview ─────────────────────────────────────────────────────
+        async function fetchLivePreview() {
+            const area = parseFloat(document.getElementById('area').value);
+            if (!area || area < 200) return;
+            const pill    = document.getElementById('live-preview-pill');
+            const spinner = document.getElementById('live-spinner');
+            const priceEl = document.getElementById('live-price');
+            const rangeEl = document.getElementById('live-range');
+            pill.classList.add('live-loading'); spinner.classList.remove('hidden'); priceEl.innerText = '...';
+            const payload = buildPayload(0);
+            try {
+                const data = await postJson(`/predict/${currentMode}`, payload);
+                priceEl.innerText = formatMoney(data.prediction, data.currency);
+                rangeEl.innerText = formatMoney(data.range_low, data.currency) + ' – ' + formatMoney(data.range_high, data.currency);
+            } catch {
+                priceEl.innerText = 'Preview unavailable'; rangeEl.innerText = '—';
+            } finally { pill.classList.remove('live-loading'); spinner.classList.add('hidden'); }
+        }
+        const debouncedPreview = debounce(fetchLivePreview, 500);
+        document.getElementById('pred-form').addEventListener('input', () => debouncedPreview());
+        document.getElementById('pred-form').addEventListener('change', () => debouncedPreview());
+
+        // ── Build prediction payload ─────────────────────────────────────────
+        function buildPayload(listingPrice) {
+            if (currentMode === 'india') {
+                return {
+                    area:          numberValue('area', 1200),
+                    bedrooms:      numberValue('beds', 2),
+                    bathrooms:     numberValue('baths', 1),
+                    floor:         numberValue('floor', 5),
+                    total_floors:  numberValue('total_floors', 15),
+                    dist_metro:    numberValue('dist_metro', 3.0),
+                    dist_bus:      numberValue('dist_bus', 2.0),
+                    dist_railway:  numberValue('dist_railway', 5.0),
+                    dist_highway:  numberValue('dist_highway', 3.0),
+                    dist_it_park:  numberValue('dist_it', 5.0),
+                    dist_school:   numberValue('dist_school', 1.5),
+                    age_years:     numberValue('age_years', 5),
+                    rera_approved: numberValue('rera_approved', 1),
+                    listing_price: listingPrice,
+                    city:          document.getElementById('city_state').value.trim() || 'Bengaluru',
+                    facing: document.getElementById('facing').value, builder: document.getElementById('builder').value,
+                };
+            } else {
+                const yb = numberValue('year_built', 1995);
+                return {
+                    area:               numberValue('area', 1200),
+                    lot_area:           numberValue('lot_area', 6000),
+                    bedrooms:           numberValue('beds', 2),
+                    bathrooms:          numberValue('baths', 1),
+                    year_built:         yb, year_remodeled: numberValue('year_remodeled', 2000),
+                    school_rating:      numberValue('school_rating', 7),
+                    walk_score:         numberValue('walk_score', 65),
+                    transit_score:      numberValue('transit_score', 50),
+                    bike_score:         numberValue('bike_score', 50),
+                    flood_zone:        numberValue('flood_zone', 0),
+                    fire_zone:         numberValue('fire_zone', 0),
+                    hoa_fees:          numberValue('hoa_fees', 150),
+                    commute_time:      numberValue('commute_time', 30),
+                    bsmt_total_sqft:   numberValue('bsmt_total_sqft', 800),
+                    bsmt_finished_sqft: numberValue('bsmt_finished_sqft', 600),
+                    hvac_age:          numberValue('hvac_age', 5),
+                    listing_price: listingPrice, zipcode: numberValue('zipcode', 90210),
+                };
+            }
+        }
+
+        // ── Step nav ─────────────────────────────────────────────────────────
+        function nextStep(step) {
+            document.querySelectorAll('.step-panel').forEach(el => el.classList.remove('active'));
+            document.getElementById(`step-${step}`).classList.add('active');
+            if (step === 2) document.getElementById('prog-2').classList.replace('bg-white/20', 'bg-cyan');
+        }
+
+        function resetForm() {
+            document.getElementById('results').classList.add('hidden');
+            document.getElementById('advanced-results').classList.add('hidden');
+            document.getElementById('pred-form').classList.remove('hidden');
+            nextStep(1);
+            document.getElementById('prog-2').classList.replace('bg-cyan', 'bg-white/20');
+            window.scrollTo(0, 0);
+        }
+
+        // ── Formatting ───────────────────────────────────────────────────────
+        function formatMoney(amount, currency) {
+            return new Intl.NumberFormat(currency === 'INR' ? 'en-IN' : 'en-US', {
+                style: 'currency', currency, maximumFractionDigits: 0
+            }).format(amount);
+        }
+
+        function animateValue(id, start, end, duration, currency) {
+            const obj = document.getElementById(id);
+            let startTimestamp = null;
+            const step = (timestamp) => {
+                if (!startTimestamp) startTimestamp = timestamp;
+                const progress = Math.min((timestamp - startTimestamp) / duration, 1);
+                obj.innerHTML = formatMoney(Math.floor(progress * (2 - progress) * (end - start) + start), currency);
+                if (progress < 1) window.requestAnimationFrame(step);
+                else obj.innerHTML = formatMoney(end, currency);
+            };
+            window.requestAnimationFrame(step);
+        }
+
+        // ── Main form submit ─────────────────────────────────────────────────
+        async function submitForm() {
+            const btn = document.getElementById('run-model-btn');
+            const orig = btn.innerHTML;
+            btn.innerHTML = `<svg class="animate-spin h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg> Processing...`;
+            btn.disabled = true;
+            const listingPrice = parseFloat(document.getElementById('listing_price').value) || 0;
+            const cityState    = document.getElementById('city_state').value || 'Default';
+            const payload      = buildPayload(listingPrice);
+            let data;
+            try {
+                data = await postJson(`/predict/${currentMode}`, payload);
+            } catch (err) {
+                const hint = err.status === 422 || err.status === 400
+                    ? 'Review the property details and try again.'
+                    : 'Check that the API server is running.';
+                alert(`Prediction could not be completed: ${err.message}\n${hint}`);
+                btn.innerHTML = orig; btn.disabled = false;
+                return;
+            }
+            lastPredictionPrice = data.prediction; lastCurrency = data.currency;
+            document.getElementById('pred-form').classList.add('hidden');
+            document.getElementById('results').classList.remove('hidden');
+            document.getElementById('advanced-results').classList.remove('hidden');
+            animateValue('final-price', 0, data.prediction, 1500, data.currency);
+            document.getElementById('range-low').innerText  = formatMoney(data.range_low,  data.currency);
+            document.getElementById('range-high').innerText = formatMoney(data.range_high, data.currency);
+            document.getElementById('model-source').innerText = data.data_source === 'synthetic demo'
+                ? 'DEMO ESTIMATE — trained on synthetic examples, not real market prices'
+                : `Trained on ${data.data_source}; verify against comparable local sales`;
+            document.getElementById('explanation-scope').innerText = data.explanation_scope === 'unavailable'
+                ? 'Feature explanations unavailable' : `SHAP: ${data.explanation_scope}`;
+            renderShapChart(data.shap_values || []);
+            handleNegotiation(data.negotiation, data.currency);
+            document.getElementById('inv-score-val').innerText = '—';
+            document.getElementById('inv-verdict').innerText = 'Enter assumptions above and click Calculate Scenario Score.';
+            document.getElementById('gauge-needle').style.transform = 'rotate(-90deg)';
+            runFuturePrice(data.prediction, cityState);
+            runRentVsBuy();
+            btn.innerHTML = orig; btn.disabled = false;
+        }
+
+        // ── SHAP chart ───────────────────────────────────────────────────────
+        function renderShapChart(shapData) {
+            const ctx = document.getElementById('shapChart').getContext('2d');
+            if (chartInstance) chartInstance.destroy();
+            if (!shapData.length) return;
+            if (typeof Chart === 'undefined') {
+                document.getElementById('shap-fallback').classList.remove('hidden');
+                return;
+            }
+            document.getElementById('shap-fallback').classList.add('hidden');
+            chartInstance = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: shapData.map(d => d.feature),
+                    datasets: [{ data: shapData.map(d => d.impact), backgroundColor: shapData.map(d => d.impact > 0 ? 'rgba(76,201,240,0.8)' : 'rgba(247,37,133,0.8)') }]
+                },
+                options: { indexAxis: 'y', plugins: { legend: { display: false } }, scales: { x: { grid: { color: 'rgba(255,255,255,0.1)' }, ticks: { color: '#9ca3af' } }, y: { grid: { display: false }, ticks: { color: '#9ca3af' } } } }
+            });
+        }
+
+        // ── Negotiation ──────────────────────────────────────────────────────
+        function handleNegotiation(neg, currency) {
+            const card = document.getElementById('neg-card');
+            if (neg) {
+                card.classList.remove('hidden');
+                document.getElementById('neg-diff').innerText  = neg.diff_pct + '%';
+                document.getElementById('neg-offer').innerText = formatMoney(neg.suggested_offer, currency);
+                document.getElementById('neg-advice').innerText = neg.advice;
+                const badge = document.getElementById('neg-badge');
+                badge.className = `inline-block px-4 py-1 rounded-full text-sm font-bold mb-4 text-white ${neg.status === 'Overpriced' ? 'bg-status-red' : neg.status === 'Underpriced' ? 'bg-status-green' : 'bg-status-amber'}`;
+                badge.innerText = neg.status;
+            } else { card.classList.add('hidden'); }
+        }
+
+        // ── Investment score ─────────────────────────────────────────────────
+        async function runInvestmentScore() {
+            const scoreEl = document.getElementById('inv-score-val');
+            const verdictEl = document.getElementById('inv-verdict');
+            const listingPrice = Number(document.getElementById('listing_price').value);
+            const growthRaw = document.getElementById('inv_cagr').value.trim();
+            const yieldRaw = document.getElementById('inv_yield').value.trim();
+            const infraRaw = document.getElementById('inv_infra').value.trim();
+            if (!lastPredictionPrice || !listingPrice || listingPrice <= 0 ||
+                growthRaw === '' || yieldRaw === '' || infraRaw === '') {
+                scoreEl.innerText = '—';
+                verdictEl.innerText = 'Provide the listing price, growth, rental yield and infrastructure rating.';
+                return;
+            }
+            const growth = Number(growthRaw), rentalYield = Number(yieldRaw), infrastructure = Number(infraRaw);
+            if (![growth, rentalYield, infrastructure].every(Number.isFinite) ||
+                growth < 0 || growth > 30 || rentalYield < 0 || rentalYield > 20 ||
+                infrastructure < 0 || infrastructure > 10) {
+                scoreEl.innerText = '—';
+                verdictEl.innerText = 'Use growth 0–30%, yield 0–20%, and infrastructure 0–10.';
+                return;
+            }
+            let data;
+            try {
+                data = await postJson('/score/investment', {
+                    predicted_price: lastPredictionPrice,
+                    locality_cagr: growth / 100,
+                    rental_yield: rentalYield / 100,
+                    infrastructure_score: infrastructure / 10,
+                    price_vs_fair_value: (listingPrice - lastPredictionPrice) / lastPredictionPrice
+                });
+            } catch (err) {
+                scoreEl.innerText = '—';
+                verdictEl.innerText = `Unavailable: ${err.message}`;
+                return;
+            }
+            scoreEl.innerText = `${data.investment_score} / 100`;
+            verdictEl.innerText = `${data.verdict} — illustrative scenario only`;
+            verdictEl.style.color = data.color === 'green' ? '#10B981' : data.color === 'red' ? '#EF4444' : data.color === 'cyan' ? '#4CC9F0' : '#F59E0B';
+            document.getElementById('gauge-needle').style.transform = `rotate(${(data.investment_score / 100 * 180) - 90}deg)`;
+        }
+
+        // ── Future price ─────────────────────────────────────────────────────
+        async function runFuturePrice(prediction, city) {
+            let data;
+            try {
+                data = await postJson('/predict/future', { current_price: prediction, city_or_state: city, years: 5 });
+            } catch (err) {
+                document.getElementById('future-sub').innerText = `Unavailable: ${err.message}`;
+                return;
+            }
+            document.getElementById('future-sub').innerText = `Illustrative (not ML forecast): assumed CAGR of ${(data.cagr_used * 100).toFixed(1)}%`;
+            if (typeof Chart === 'undefined') {
+                document.getElementById('future-sub').innerText += ' (Chart.js unavailable)';
+                return;
+            }
+            const ctx = document.getElementById('futureChart').getContext('2d');
+            if (futureChartInst) futureChartInst.destroy();
+            futureChartInst = new Chart(ctx, {
+                type: 'line',
+                data: { labels: data.projections.map(d => 'Year ' + d.year), datasets: [{ label: 'Projected Value', data: data.projections.map(d => d.price), borderColor: '#7209B7', backgroundColor: 'rgba(114,9,183,0.2)', fill: true, tension: 0.4 }] },
+                options: { plugins: { legend: { display: false } }, scales: { y: { ticks: { display: false } } } }
+            });
+        }
+
+        // ── Rent vs Buy ──────────────────────────────────────────────────────
+        async function runRentVsBuy() {
+            if (!lastPredictionPrice) return;
+            const rentAmt = numberValue('calc_rent', currentMode === 'india' ? 25000 : 2500);
+            const downPct = numberValue('calc_down', 20) / 100;
+            let data;
+            try {
+                data = await postJson('/calc/rent-vs-buy', { property_price: lastPredictionPrice, monthly_rent: rentAmt, down_payment_pct: downPct, loan_interest_rate: currentMode === 'india' ? 0.085 : 0.065, loan_tenure_years: currentMode === 'india' ? 20 : 30, annual_price_growth: 0.07, annual_rent_growth: 0.05, currency: lastCurrency });
+            } catch (err) {
+                document.getElementById('rent-buy-verdict').innerText = `Unavailable: ${err.message}`;
+                return;
+            }
+            document.getElementById('rent-buy-verdict').innerText = data.verdict + ' (Illustrative; excludes taxes, fees & upkeep.)';
+            if (typeof Chart === 'undefined') {
+                document.getElementById('rent-buy-verdict').innerText += ' (Chart.js unavailable)';
+                return;
+            }
+            const ctx = document.getElementById('rentBuyChart').getContext('2d');
+            if (rentBuyChartInst) rentBuyChartInst.destroy();
+            rentBuyChartInst = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: data.yearly_data.map(d => 'Yr ' + d.year),
+                    datasets: [
+                        { label: 'Net Buying Cost', data: data.yearly_data.map(d => d.buy_net_cost), borderColor: '#4361EE', tension: 0.1 },
+                        { label: 'Cumulative Rent', data: data.yearly_data.map(d => d.rent_cumulative), borderColor: '#F72585', tension: 0.1 }
+                    ]
+                },
+                options: {
+                    plugins: {
+                        legend: { labels: { color: 'white' } },
+                        annotation: { annotations: data.breakeven_year ? { line1: { type: 'line', xMin: data.breakeven_year - 1, xMax: data.breakeven_year - 1, borderColor: '#4CC9F0', borderWidth: 2, borderDash: [5, 5] } } : {} }
+                    },
+                    scales: { y: { ticks: { display: false }, grid: { color: 'rgba(255,255,255,0.1)' } }, x: { grid: { display: false } } }
+                }
+            });
+        }
+
+        // ── Bulk predictions ─────────────────────────────────────────────────
+        let selectedFile = null;
+        function handleFileUpload(event) { selectedFile = event.target.files[0]; if (selectedFile) document.getElementById('file-name').innerText = selectedFile.name; }
+
+        async function uploadBulk() {
+            if (!selectedFile) return alert('Please select a CSV.');
+            const mode = document.querySelector('input[name="bulk-mode"]:checked').value;
+            const btn = document.getElementById('btn-bulk'); const orig = btn.innerHTML;
+            btn.innerHTML = 'Processing...'; btn.disabled = true;
+            const formData = new FormData(); formData.append('file', selectedFile);
+            let data;
+            try {
+                data = await fetchJson(`${API}/predict/bulk?mode=${mode}`, { method: 'POST', body: formData });
+            } catch (err) {
+                alert(`Bulk prediction failed: ${err.message}`);
+                btn.innerHTML = orig; btn.disabled = false;
+                return;
+            }
+            bulkDataCache = data.predictions;
+            document.getElementById('bulk-results').classList.remove('hidden');
+            document.getElementById('bulk-count').innerText = data.total_rows;
+            const tbody = document.getElementById('bulk-table-body'); tbody.innerHTML = '';
+            const currency = mode === 'india' ? 'INR' : 'USD';
+            data.predictions.slice(0, 100).forEach(row => {
+                const tr = document.createElement('tr');
+                tr.innerHTML = `<td class="p-3">${row.row_index}</td><td class="p-3 font-bold text-cyan">${formatMoney(row.prediction, currency)}</td><td class="p-3 text-gray-400">${formatMoney(row.range_low, currency)}</td><td class="p-3 text-gray-400">${formatMoney(row.range_high, currency)}</td>`;
+                tbody.appendChild(tr);
+            });
+            btn.innerHTML = orig; btn.disabled = false;
+        }
+
+        function downloadBulkCSV() {
+            if (!bulkDataCache.length) return;
+            const csv = 'Row,Prediction,Range_Low,Range_High\n' + bulkDataCache.map(r => `${r.row_index},${r.prediction},${r.range_low},${r.range_high}`).join('\n');
+            const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
+            a.download = 'BulkResults.csv'; a.click(); URL.revokeObjectURL(a.href);
+        }
+
+        // ── Compare properties ───────────────────────────────────────────────
+        function setCompareMode(prop, mode) {
+            if (prop === 'A') {
+                compareModeA = mode;
+                document.getElementById('cmp-a-in').className = mode === 'india' ? 'flex-1 py-1.5 rounded-lg bg-electric text-white text-sm font-bold' : 'flex-1 py-1.5 rounded-lg bg-white/10 text-white text-sm font-bold';
+                document.getElementById('cmp-a-us').className = mode === 'usa'   ? 'flex-1 py-1.5 rounded-lg bg-gold text-white text-sm font-bold'    : 'flex-1 py-1.5 rounded-lg bg-white/10 text-white text-sm font-bold';
+            } else {
+                compareModeB = mode;
+                document.getElementById('cmp-b-in').className = mode === 'india' ? 'flex-1 py-1.5 rounded-lg bg-electric text-white text-sm font-bold' : 'flex-1 py-1.5 rounded-lg bg-white/10 text-white text-sm font-bold';
+                document.getElementById('cmp-b-us').className = mode === 'usa'   ? 'flex-1 py-1.5 rounded-lg bg-gold text-white text-sm font-bold'    : 'flex-1 py-1.5 rounded-lg bg-white/10 text-white text-sm font-bold';
+            }
+        }
+
+        function buildComparePayload(p, mode) {
+            const area  = numberValue(`cmp-${p}-area`, 1200);
+            const beds  = numberValue(`cmp-${p}-beds`, 2);
+            const baths = numberValue(`cmp-${p}-baths`, 2);
+            if (mode === 'india') {
+                return { endpoint: '/predict/india', payload: { area, bedrooms: beds, bathrooms: baths, floor: 5, total_floors: 15, dist_metro: 3.0, dist_bus: 2.0, dist_railway: 5.0, dist_highway: 3.0, dist_it_park: 5.0, dist_school: 1.5, age_years: 5, rera_approved: 1, listing_price: numberValue(`cmp-${p}-listing`, 0), city: document.getElementById(`cmp-${p}-city`).value.trim() || 'Bengaluru', facing: 'East', builder: 'Unknown' } };
+            } else {
+                return { endpoint: '/predict/usa', payload: { area, lot_area: 6000, bedrooms: beds, bathrooms: baths, year_built: 1995, year_remodeled: 2000, school_rating: 7, walk_score: 65, transit_score: 50, bike_score: 50, flood_zone: 0, fire_zone: 0, hoa_fees: 150, commute_time: 30, bsmt_total_sqft: 800, bsmt_finished_sqft: 600, hvac_age: 5, listing_price: numberValue(`cmp-${p}-listing`, 0), zipcode: 90210 } };
+            }
+        }
+
+        async function compareProperties() {
+            const btn = document.getElementById('btn-compare'); const orig = btn.innerHTML;
+            btn.innerHTML = 'Comparing...'; btn.disabled = true;
+            try {
+                const reqA = buildComparePayload('a', compareModeA);
+                const reqB = buildComparePayload('b', compareModeB);
+                const [dataA, dataB] = await Promise.all([
+                    postJson(reqA.endpoint, reqA.payload),
+                    postJson(reqB.endpoint, reqB.payload)
+                ]);
+                document.getElementById('compare-results').classList.remove('hidden');
+                document.getElementById('compare-results').scrollIntoView({ behavior: 'smooth' });
+                document.getElementById('cmp-price-a').innerText = formatMoney(dataA.prediction, dataA.currency);
+                document.getElementById('cmp-low-a').innerText   = formatMoney(dataA.range_low,  dataA.currency);
+                document.getElementById('cmp-high-a').innerText  = formatMoney(dataA.range_high, dataA.currency);
+                document.getElementById('cmp-price-b').innerText = formatMoney(dataB.prediction, dataB.currency);
+                document.getElementById('cmp-low-b').innerText   = formatMoney(dataB.range_low,  dataB.currency);
+                document.getElementById('cmp-high-b').innerText  = formatMoney(dataB.range_high, dataB.currency);
+                document.getElementById('cmp-badge-a').classList.add('hidden');
+                document.getElementById('cmp-badge-b').classList.add('hidden');
+                if (dataA.currency === dataB.currency) {
+                    const diff    = Math.abs(dataA.prediction - dataB.prediction);
+                    const pctDiff = (diff / Math.max(dataA.prediction, dataB.prediction)) * 100;
+                    if (dataA.prediction < dataB.prediction) {
+                        document.getElementById('cmp-badge-a').classList.remove('hidden');
+                        document.getElementById('cmp-winner').innerText = 'Property A';
+                        document.getElementById('cmp-reason').innerText = `Property A has a ${formatMoney(diff, dataA.currency)} lower estimated market price; this is not an investment ranking.`;
+                    } else {
+                        document.getElementById('cmp-badge-b').classList.remove('hidden');
+                        document.getElementById('cmp-winner').innerText = 'Property B';
+                        document.getElementById('cmp-reason').innerText = `Property B has a ${formatMoney(diff, dataB.currency)} lower estimated market price; this is not an investment ranking.`;
+                    }
+                    document.getElementById('cmp-diff-text').innerText = `Price difference: ${formatMoney(diff, dataA.currency)} (${pctDiff.toFixed(1)}%)`;
+                } else {
+                    document.getElementById('cmp-diff-text').innerText = 'Cross-country comparison.';
+                    document.getElementById('cmp-winner').innerText    = 'Different currencies';
+                    document.getElementById('cmp-reason').innerText    = 'Requires currency conversion.';
+                }
+                if (typeof Chart === 'undefined') {
+                    document.getElementById('cmp-reason').innerText += ' Chart unavailable (Chart.js could not load).';
+                    return;
+                }
+                const ctx = document.getElementById('radarChart').getContext('2d');
+                if (radarChartInst) radarChartInst.destroy();
+                const areaA = parseFloat(document.getElementById('cmp-a-area').value) || 1200;
+                const areaB = parseFloat(document.getElementById('cmp-b-area').value) || 1500;
+                radarChartInst = new Chart(ctx, {
+                    type: 'radar',
+                    data: {
+                        labels: ['Area', 'Bedrooms', 'Bathrooms'],
+                        datasets: [
+                            { label: 'Property A', data: [Math.min(100, (areaA / 5000) * 100), Math.min(100, numberValue('cmp-a-beds', 2) * 20), Math.min(100, numberValue('cmp-a-baths', 2) * 20)], borderColor: '#4361EE', backgroundColor: 'rgba(67,97,238,0.2)' },
+                            { label: 'Property B', data: [Math.min(100, (areaB / 5000) * 100), Math.min(100, numberValue('cmp-b-beds', 2) * 20), Math.min(100, numberValue('cmp-b-baths', 2) * 20)], borderColor: '#7209B7', backgroundColor: 'rgba(114,9,183,0.2)' }
+                        ]
+                    },
+                    options: { responsive: true, plugins: { legend: { labels: { color: 'white' } } }, scales: { r: { min: 0, max: 100, grid: { color: 'rgba(255,255,255,0.1)' }, angleLines: { color: 'rgba(255,255,255,0.1)' }, ticks: { display: false } } } }
+                });
+            } catch (err) { alert('Comparison failed: ' + err.message); }
+            finally { btn.innerHTML = orig; btn.disabled = false; }
+        }
+    </script>
+</body>
+</html>
