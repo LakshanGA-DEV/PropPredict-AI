@@ -1,0 +1,55 @@
+# On-demand local-prototype regression verification only.
+# No deployment, training-data upload, secrets, or release promotion.
+name: PropPredict AI - manual regression checks
+
+on:
+  workflow_dispatch:
+    inputs:
+      runner_cost_approval:
+        description: 'Type RUN to approve a GitHub Actions runner job (check billing limits first)'
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  python-regressions:
+    name: Python source and regression tests (no deployment)
+    if: github.ref == 'refs/heads/main' && inputs.runner_cost_approval == 'RUN'
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - name: Check out current PropPredict source
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install application test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+          python -m pip check
+
+      - name: Check Python source syntax
+        run: python -m compileall -q api.py feature_engineering.py model_india.py model_usa.py tests
+
+      - name: Run 10 existing Python regression tests
+        run: python -m unittest discover -s tests -v
+
+      - name: Record testing scope and limitations
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo '### PropPredict AI - Python-only engineering verification'
+            echo '- Tests are run against the checked-out main branch commit.'
+            echo '- No production deployment, model training job, or real-estate market validation was performed.'
+            echo '- No browser/visual UI acceptance or real housing dataset evaluation was performed.'
+            echo '- Test success is NOT proof of real-world valuation accuracy or production readiness.'
+          } >> "$GITHUB_STEP_SUMMARY"
